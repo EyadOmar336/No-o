@@ -73,6 +73,7 @@ fun ProUpgradeScreen(
             }
         },
         bottomBar = {
+            val context = androidx.compose.ui.platform.LocalContext.current
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -82,12 +83,12 @@ fun ProUpgradeScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = { viewModel.upgradeToPro() },
+                    onClick = { viewModel.openWhatsAppPayment(context, "201013010130") },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
-                        .shadow(16.dp, RoundedCornerShape(28.dp), spotColor = Color(0xFFF59E0B))
-                        .testTag("pro_subscribe_button"),
+                        .height(58.dp)
+                        .shadow(16.dp, RoundedCornerShape(28.dp), spotColor = Color(0xFF10B981))
+                        .testTag("pro_whatsapp_contact_button"),
                     shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
                     contentPadding = PaddingValues(0.dp)
@@ -97,27 +98,38 @@ fun ProUpgradeScreen(
                             .fillMaxSize()
                             .background(
                                 Brush.horizontalGradient(
-                                    listOf(Color(0xFFF59E0B), Color(0xFFEA580C))
+                                    listOf(Color(0xFF059669), Color(0xFF10B981), Color(0xFF34D399))
                                 )
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = if (user?.isPro == true)
-                                (if (isAr) "أنت مشترك بالفعل في PRO ✨" else "You are already PRO ✨")
-                            else
-                                (if (isAr) "ترقية الحساب والبدء الآن 🚀" else "Upgrade Now 🚀"),
-                            color = Color.White,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Chat,
+                                contentDescription = "WhatsApp",
+                                tint = Color.Black,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = if (isAr) "الرجاء الاتصال على وتساب على الرقم الاعلى للاشتراك" else "Contact on WhatsApp to Subscribe",
+                                color = Color.Black,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
 
                 Text(
-                    text = if (isAr) "إلغاء الاشتراك في أي وقت • ضمان استرداد خلال 7 أيام" else "Cancel anytime • 7-day money-back guarantee",
+                    text = if (isAr) "يتم تفعيل الاشتراك فور تأكيد التحويل عبر واتساب • دعم على مدار الساعة" else "Account activated instantly upon WhatsApp verification • 24/7 Support",
                     color = TextMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
                 )
             }
         },

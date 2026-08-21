@@ -139,7 +139,7 @@ fun HomeScreen(
 
             // Daily Usage Card
             UsageProgressBar(
-                used = dailyUsage?.questionsUsed ?: 7,
+                used = dailyUsage?.questionsUsed ?: 0,
                 limit = dailyUsage?.questionsLimit ?: 10,
                 isPro = user?.isPro == true,
                 isAr = isAr,
