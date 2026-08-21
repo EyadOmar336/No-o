@@ -1,0 +1,6 @@
+{
+  "name": "StudySnap AI",
+  "description": "Snap it. Understand it. Master it. AI-powered homework and educational assistant for students.",
+  "requestFramePermissions": ["android.permission.CAMERA"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
