@@ -276,6 +276,53 @@ fun ProfileScreen(
 
                     Divider(color = Color(0xFF1E293B))
 
+                    // Notifications Settings
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Filled.NotificationsActive, contentDescription = "Notifications", tint = Color(0xFF10B981))
+                            Column {
+                                Text(
+                                    text = if (isAr) "إشعارات المذاكرة والتحفيز" else "Study Notifications",
+                                    color = TextWhite,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = if (isAr) "تذكيرات يومية لمراجعة الأسئلة" else "Daily revision alerts",
+                                    color = TextGray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        TextButton(
+                            onClick = {
+                                com.example.util.NotificationHelper.sendNotification(
+                                    context,
+                                    "🎯 تذكير المذاكرة من StudySnap AI",
+                                    "أحسنت! حافظ على نشاطك اليومي وحل سؤالاً جديداً الآن لتقوية مستواك 🚀"
+                                )
+                            },
+                            modifier = Modifier.testTag("send_test_notification_btn")
+                        ) {
+                            Text(
+                                text = if (isAr) "تجربة إشعار" else "Test Alert",
+                                color = Color(0xFF10B981),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Divider(color = Color(0xFF1E293B))
+
                     // Dark Theme Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),

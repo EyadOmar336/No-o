@@ -1,23 +1,32 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.example.ui.AppScreen
 import com.example.ui.StudyViewModel
 import com.example.ui.screens.*
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.StudySnapTheme
+import com.example.util.NotificationHelper
 
 class MainActivity : ComponentActivity() {
     private val viewModel: StudyViewModel by viewModels()
@@ -26,9 +35,39 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Initialize Notifications
+        NotificationHelper.createNotificationChannel(this)
+        NotificationHelper.scheduleRecurringStudyReminders(this)
+
         setContent {
             val user by viewModel.user.collectAsState()
             val currentScreen by viewModel.currentScreen.collectAsState()
+            val context = LocalContext.current
+
+            // Notification Permission Request for Android 13+
+            val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { isGranted ->
+                if (isGranted) {
+                    NotificationHelper.sendNotification(
+                        context,
+                        "✨ مرحباً بك في StudySnap AI!",
+                        "الإشعارات مفعلة الآن بنجاح لتذكيرك بالمذاكرة وحل الأسئلة."
+                    )
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
 
             val isDark = user?.isDarkMode ?: true
             val isRtl = (user?.language ?: "ar") != "en"

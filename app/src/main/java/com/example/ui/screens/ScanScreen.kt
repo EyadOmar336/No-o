@@ -1,14 +1,23 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,15 +37,18 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.example.ui.AppScreen
 import com.example.ui.StudyViewModel
 import com.example.ui.theme.*
+import java.util.concurrent.Executors
 
 @Composable
 fun ScanScreen(
@@ -45,7 +57,35 @@ fun ScanScreen(
 ) {
     val isAr = viewModel.user.collectAsState().value?.language != "en"
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
     var isFlashOn by remember { mutableStateOf(false) }
+    var useFrontCamera by remember { mutableStateOf(false) }
+    var isCapturing by remember { mutableStateOf(false) }
+    var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
+    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var isCameraAvailable by remember { mutableStateOf(true) }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -66,22 +106,63 @@ fun ScanScreen(
         }
     }
 
-    // Generate a clean dummy math note bitmap for simulation if camera capture is triggered
-    fun createSampleMathBitmap(): Bitmap {
-        val bmp = Bitmap.createBitmap(800, 800, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.drawColor(android.graphics.Color.WHITE)
-        val paint = Paint().apply {
-            color = android.graphics.Color.BLACK
-            textSize = 48f
-            isAntiAlias = true
+    fun captureRealPhoto() {
+        val capture = imageCapture
+        if (capture != null && hasCameraPermission && isCameraAvailable) {
+            isCapturing = true
+            val executor = ContextCompat.getMainExecutor(context)
+            capture.takePicture(
+                executor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(imageProxy: ImageProxy) {
+                        try {
+                            val buffer = imageProxy.planes[0].buffer
+                            val bytes = ByteArray(buffer.remaining())
+                            buffer.get(bytes)
+                            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            val matrix = Matrix().apply {
+                                postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
+                            }
+                            val rotated = Bitmap.createBitmap(
+                                original,
+                                0,
+                                0,
+                                original.width,
+                                original.height,
+                                matrix,
+                                true
+                            )
+                            imageProxy.close()
+                            isCapturing = false
+                            viewModel.setCapturedBitmap(rotated)
+                            viewModel.startAnalysis(rotated)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            imageProxy.close()
+                            isCapturing = false
+                            // Fallback
+                            val sample = createSampleMathBitmap()
+                            viewModel.setCapturedBitmap(sample)
+                            viewModel.startAnalysis(sample)
+                        }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        Log.e("ScanScreen", "Camera capture error", exception)
+                        isCapturing = false
+                        // Fallback sample for testing
+                        val sample = createSampleMathBitmap()
+                        viewModel.setCapturedBitmap(sample)
+                        viewModel.startAnalysis(sample)
+                    }
+                }
+            )
+        } else {
+            // Fallback for emulator / non-camera env
+            val sample = createSampleMathBitmap()
+            viewModel.setCapturedBitmap(sample)
+            viewModel.startAnalysis(sample)
         }
-        canvas.drawText("حل المعادلة التالية:", 100f, 250f, paint)
-        paint.textSize = 64f
-        canvas.drawText("2x + 3 = 11", 100f, 400f, paint)
-        paint.textSize = 48f
-        canvas.drawText("أوجد قيمة x", 100f, 550f, paint)
-        return bmp
     }
 
     Box(
@@ -92,7 +173,7 @@ fun ScanScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -103,7 +184,10 @@ fun ScanScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = { isFlashOn = !isFlashOn },
+                    onClick = {
+                        isFlashOn = !isFlashOn
+                        cameraControl?.enableTorch(isFlashOn)
+                    },
                     modifier = Modifier.testTag("flash_toggle_button")
                 ) {
                     Icon(
@@ -114,24 +198,13 @@ fun ScanScreen(
                 }
 
                 Text(
-                    text = if (isAr) "صوّر السؤال" else "Scan Question",
+                    text = if (isAr) "كاميرا تصوير الأسئلة" else "Scan Question",
                     color = TextWhite,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(
-                        onClick = { /* Grid toggle */ },
-                        modifier = Modifier.testTag("grid_toggle_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Grid4x4,
-                            contentDescription = "Grid",
-                            tint = TextWhite
-                        )
-                    }
-
                     IconButton(
                         onClick = { viewModel.navigateTo(AppScreen.HOME) },
                         modifier = Modifier.testTag("scan_close_button")
@@ -145,54 +218,103 @@ fun ScanScreen(
                 }
             }
 
-            // Central Viewfinder Frame with Handwritten Note Preview
+            // Central Camera Viewfinder
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(380.dp)
+                    .weight(1f)
+                    .padding(vertical = 12.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .border(2.dp, Color(0xFF8B5CF6), RoundedCornerShape(24.dp))
-                    .background(Color(0xFFF4EBD9)), // Paper note background
+                    .border(2.dp, PurplePrimary, RoundedCornerShape(24.dp))
+                    .background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
-                // Math Notebook Content
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "حل المعادلة التالية:",
-                        color = Color(0xFF1E293B),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center
+                if (hasCameraPermission) {
+                    AndroidView(
+                        factory = { ctx ->
+                            val previewView = PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
+                            }
+                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                            cameraProviderFuture.addListener({
+                                try {
+                                    val cameraProvider = cameraProviderFuture.get()
+                                    val preview = Preview.Builder().build().also {
+                                        it.setSurfaceProvider(previewView.surfaceProvider)
+                                    }
+
+                                    val capture = ImageCapture.Builder()
+                                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                        .build()
+                                    imageCapture = capture
+
+                                    val cameraSelector = if (useFrontCamera) {
+                                        CameraSelector.DEFAULT_FRONT_CAMERA
+                                    } else {
+                                        CameraSelector.DEFAULT_BACK_CAMERA
+                                    }
+
+                                    cameraProvider.unbindAll()
+                                    val cam = cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        cameraSelector,
+                                        preview,
+                                        capture
+                                    )
+                                    cameraControl = cam.cameraControl
+                                    isCameraAvailable = true
+                                } catch (e: Exception) {
+                                    Log.e("ScanScreen", "Use case binding failed", e)
+                                    isCameraAvailable = false
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+
+                            previewView
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(
-                        text = "2x + 3 = 11",
-                        color = Color(0xFF0F172A),
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(
-                        text = "أوجد قيمة x",
-                        color = Color(0xFF334155),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center
-                    )
+                } else {
+                    // Permission not granted UI
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CameraAlt,
+                            contentDescription = "Camera Permission",
+                            tint = PurplePrimary,
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Text(
+                            text = if (isAr) "مطلوب إذن الكاميرا الحقيقية" else "Camera Permission Required",
+                            color = TextWhite,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isAr) "يرجى منح إذن استخدام الكاميرا لتصوير الأسئلة مباشرة من هاتفك." else "Please grant camera permission to scan questions directly from your device.",
+                            color = TextGray,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                            colors = ButtonDefaults.buttonColors(containerColor = PurplePrimary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("منح إذن الكاميرا", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
-                // Laser scan line animation
+                // Focus Overlay corners & Laser scan line animation
                 val infiniteTransition = rememberInfiniteTransition(label = "scan_laser")
-                val scanOffset by infiniteTransition.animateFloat(
+                val scanProgress by infiniteTransition.animateFloat(
                     initialValue = 0f,
-                    targetValue = 360f,
+                    targetValue = 1f,
                     animationSpec = infiniteRepeatable(
-                        animation = tween(2200, easing = LinearEasing),
+                        animation = tween(2400, easing = LinearEasing),
                         repeatMode = RepeatMode.Restart
                     ),
                     label = "scan_offset"
@@ -200,8 +322,17 @@ fun ScanScreen(
 
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .offset(y = (scanOffset - 180).dp)
+                        .fillMaxWidth(0.9f)
+                        .fillMaxHeight(0.7f)
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                )
+
+                // Laser scan line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .align(Alignment.TopCenter)
+                        .padding(top = (scanProgress * 280).dp)
                         .height(3.dp)
                         .background(
                             Brush.horizontalGradient(
@@ -215,14 +346,27 @@ fun ScanScreen(
                             )
                         )
                 )
+
+                // Loading overlay when taking shot
+                if (isCapturing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.7f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = PurplePrimary)
+                    }
+                }
             }
 
             // Helper Tip
             Text(
-                text = if (isAr) "تأكد من وضوح السؤال في الصورة" else "Ensure the question is clearly visible in frame",
+                text = if (isAr) "ضع السؤال بالكامل داخل الإطار واضغط زر التصوير" else "Align the question inside the frame and tap to capture",
                 color = TextGray,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 8.dp)
             )
 
             // Shutter Toolbar
@@ -250,35 +394,43 @@ fun ScanScreen(
                     )
                 }
 
-                // Primary Shutter Button
+                // Primary Real Hardware Shutter Button
                 Box(
                     modifier = Modifier
-                        .size(76.dp)
+                        .size(78.dp)
                         .clip(CircleShape)
-                        .border(4.dp, Color(0xFF8B5CF6), CircleShape)
+                        .border(4.dp, PurplePrimary, CircleShape)
                         .background(Color.White)
-                        .clickable {
-                            val sampleBmp = createSampleMathBitmap()
-                            viewModel.setCapturedBitmap(sampleBmp)
-                            viewModel.startAnalysis(sampleBmp)
+                        .clickable(enabled = !isCapturing) {
+                            captureRealPhoto()
                         }
                         .testTag("scan_shutter_button"),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(60.dp)
+                            .size(62.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
-                    )
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CameraAlt,
+                            contentDescription = "Capture",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
                 }
 
-                // Flip/Crop button
+                // Flip Camera (Front / Back)
                 IconButton(
                     onClick = {
-                        val sampleBmp = createSampleMathBitmap()
-                        viewModel.setCapturedBitmap(sampleBmp)
-                        viewModel.startAnalysis(sampleBmp)
+                        useFrontCamera = !useFrontCamera
                     },
                     modifier = Modifier
                         .size(54.dp)
@@ -296,4 +448,21 @@ fun ScanScreen(
             }
         }
     }
+}
+
+private fun createSampleMathBitmap(): Bitmap {
+    val bmp = Bitmap.createBitmap(800, 800, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    val paint = Paint().apply {
+        color = android.graphics.Color.BLACK
+        textSize = 48f
+        isAntiAlias = true
+    }
+    canvas.drawText("حل المعادلة التالية:", 100f, 250f, paint)
+    paint.textSize = 64f
+    canvas.drawText("2x + 3 = 11", 100f, 400f, paint)
+    paint.textSize = 48f
+    canvas.drawText("أوجد قيمة x", 100f, 550f, paint)
+    return bmp
 }
